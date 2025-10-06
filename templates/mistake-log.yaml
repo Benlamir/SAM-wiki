@@ -1,0 +1,162 @@
+# SAM Template — Mistake Log API
+# Purpose: Serverless CRUD app (API Gateway + Lambda + DynamoDB)
+# You can reuse this pattern for any small REST-style service.
+
+AWSTemplateFormatVersion: '2010-09-09'
+
+# Tells CloudFormation that this is a SAM template
+Transform: AWS::Serverless-2016-10-31
+
+Description: >
+  Mistake Log API — Example of a serverless CRUD architecture.
+  Stack creates API Gateway routes, 5 Lambda functions, and a DynamoDB table.
+
+# -----------------------
+# GLOBAL SETTINGS
+# -----------------------
+Globals:
+  Function:
+    Runtime: python3.12              # Default runtime for all Lambdas
+    Timeout: 10                      # Max execution time (seconds)
+    MemorySize: 128                  # RAM for each Lambda
+    Environment:
+      Variables:
+        TABLE_NAME: !Ref MistakesTable  # Each Lambda gets the table name
+
+# -----------------------
+# RESOURCES SECTION
+# -----------------------
+Resources:
+
+  # ---- API GATEWAY ----
+  Api:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: v1                 # URL stage: ...amazonaws.com/v1
+      EndpointConfiguration: REGIONAL
+      Cors: "'*'"                   # Allow all origins (simplify for testing)
+
+  # ---- DYNAMODB TABLE ----
+  MistakesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${AWS::StackName}-mistakes"  # Stack-based naming
+      BillingMode: PAY_PER_REQUEST                  # Auto-scale pricing
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+        - AttributeName: userId
+          AttributeType: S
+        - AttributeName: createdAt
+          AttributeType: S
+      KeySchema:                                    # Primary Key
+        - AttributeName: id
+          KeyType: HASH
+      GlobalSecondaryIndexes:                       # Optional query index
+        - IndexName: GSI1UserCreatedAt
+          KeySchema:
+            - AttributeName: userId
+              KeyType: HASH
+            - AttributeName: createdAt
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+
+  # -----------------------
+  # LAMBDA FUNCTIONS
+  # -----------------------
+
+  # Each function connects to API Gateway and DynamoDB
+  # and uses minimal IAM policies for CRUD access.
+
+  CreateMistakeFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: handlers/create.lambda_handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref MistakesTable
+      Events:
+        CreateApi:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /mistakes
+            Method: post
+
+  GetMistakeFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: handlers/get.lambda_handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref MistakesTable
+      Events:
+        GetApi:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /mistakes/{id}
+            Method: get
+
+  ListMistakesFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: handlers/list.lambda_handler
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref MistakesTable
+      Events:
+        ListApi:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /mistakes
+            Method: get
+
+  UpdateMistakeFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: handlers/update.lambda_handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref MistakesTable
+      Events:
+        UpdateApi:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /mistakes/{id}
+            Method: patch
+
+  DeleteMistakeFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: handlers/delete.lambda_handler
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref MistakesTable
+      Events:
+        DeleteApi:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /mistakes/{id}
+            Method: delete
+
+# -----------------------
+# OUTPUTS
+# -----------------------
+Outputs:
+  ApiUrl:
+    Description: Base URL for the deployed API
+    Value: !Sub "https://${Api}.execute-api.${AWS::Region}.amazonaws.com/v1"
+
+  TableName:
+    Description: DynamoDB table name
+    Value: !Ref MistakesTable
